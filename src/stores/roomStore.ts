@@ -21,6 +21,14 @@ function generateUserName(): string {
   return `User-${suffix}`
 }
 
+function loadPersistedRoom(): { roomId: string; roomName: string; token: string } | null {
+  try {
+    const raw = sessionStorage.getItem('wb_currentRoom')
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore */ }
+  return null
+}
+
 interface RoomState {
   rooms: RoomInfo[]
   roomId: string | null
@@ -30,21 +38,24 @@ interface RoomState {
   userId: string
   userName: string
   fetchRooms: () => Promise<void>
-  createRoom: (name: string, password?: string) => Promise<string | null>
-  verifyRoom: (roomId: string, password: string) => Promise<{ valid: boolean; token?: string }>
+  createRoom: (name: string, password?: string) => Promise<{ roomId: string; name: string } | null>
+  verifyRoom: (roomId: string, password: string) => Promise<{ valid: boolean; token?: string; roomName?: string }>
   setRoom: (roomId: string, roomName: string, token: string) => void
   setUserName: (name: string) => void
   setOnlineUsers: (users: OnlineUser[]) => void
   addOnlineUser: (user: OnlineUser) => void
   removeOnlineUser: (userId: string) => void
   leaveRoom: () => void
+  restoreRoom: () => boolean
 }
+
+const persisted = loadPersistedRoom()
 
 export const useRoomStore = create<RoomState>((set, get) => ({
   rooms: [],
-  roomId: null,
-  roomName: null,
-  token: null,
+  roomId: persisted?.roomId ?? null,
+  roomName: persisted?.roomName ?? null,
+  token: persisted?.token ?? null,
   onlineUsers: [],
   userId: generateUserId(),
   userName: generateUserName(),
@@ -71,7 +82,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       const json = await res.json()
       if (json.success) {
         await get().fetchRooms()
-        return json.data.roomId
+        return { roomId: json.data.roomId, name: json.data.name }
       }
       return null
     } catch {
@@ -88,7 +99,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       })
       const json = await res.json()
       if (json.success && json.data.valid) {
-        return { valid: true, token: json.data.token }
+        return { valid: true, token: json.data.token, roomName: json.data.roomName }
       }
       return { valid: false }
     } catch {
@@ -97,6 +108,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   setRoom: (roomId, roomName, token) => {
+    sessionStorage.setItem('wb_currentRoom', JSON.stringify({ roomId, roomName, token }))
     set({ roomId, roomName, token })
   },
 
@@ -123,6 +135,16 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   leaveRoom: () => {
+    sessionStorage.removeItem('wb_currentRoom')
     set({ roomId: null, roomName: null, token: null, onlineUsers: [] })
+  },
+
+  restoreRoom: () => {
+    const p = loadPersistedRoom()
+    if (p && p.roomId && p.token) {
+      set({ roomId: p.roomId, roomName: p.roomName, token: p.token })
+      return true
+    }
+    return false
   },
 }))

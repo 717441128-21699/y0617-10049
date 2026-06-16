@@ -2,7 +2,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import * as Y from 'yjs'
 import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
-import { roomsWithClients } from './routes/rooms.js'
+import { roomsWithClients, verifyToken } from './routes/rooms.js'
 import { loadSnapshot, saveSnapshot } from './persistence.js'
 
 const USER_COLORS = [
@@ -46,6 +46,11 @@ export function setupWebSocket(wss: WebSocketServer): void {
 
           if (!roomId) {
             ws.close(4001, 'roomId is required')
+            return
+          }
+
+          if (!token || !verifyToken(token, roomId)) {
+            ws.close(4003, 'Invalid or missing token')
             return
           }
 

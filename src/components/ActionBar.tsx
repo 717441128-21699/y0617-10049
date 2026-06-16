@@ -1,10 +1,12 @@
-import { ArrowLeft, ArrowRight, ZoomIn, ZoomOut, Download, RotateCcw, RotateCw } from 'lucide-react'
+import { ZoomIn, ZoomOut, Download, RotateCcw, RotateCw } from 'lucide-react'
 import { useWhiteboardStore } from '@/stores/whiteboard-store'
 import { useCrdtStore } from '@/stores/crdtStore'
+import { useRoomStore } from '@/stores/roomStore'
 
 export default function ActionBar() {
   const { canvasState, setCanvasState, resetCanvas } = useWhiteboardStore()
   const { canUndo, canRedo, undo, redo } = useCrdtStore()
+  const { roomName } = useRoomStore()
   const zoomPercent = Math.round(canvasState.scale * 100)
 
   const handleZoomIn = () => {
@@ -24,7 +26,6 @@ export default function ActionBar() {
   const handleExportPNG = () => {
     const canvas = document.querySelector('canvas')
     if (!canvas) return
-    const dpr = window.devicePixelRatio || 1
     const exportCanvas = document.createElement('canvas')
     exportCanvas.width = canvas.width
     exportCanvas.height = canvas.height
@@ -34,7 +35,8 @@ export default function ActionBar() {
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height)
     ctx.drawImage(canvas, 0, 0)
     const link = document.createElement('a')
-    link.download = 'syncboard-export.png'
+    const safeName = (roomName || 'export').replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '_')
+    link.download = `syncboard-${safeName}.png`
     link.href = exportCanvas.toDataURL('image/png')
     link.click()
   }

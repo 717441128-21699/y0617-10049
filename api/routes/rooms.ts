@@ -5,6 +5,22 @@ import { getDB } from '../db.js'
 
 export const roomsWithClients: Map<string, Set<unknown>> = new Map()
 
+interface TokenEntry {
+  roomId: string
+  issuedAt: number
+}
+
+const validTokens = new Map<string, TokenEntry>()
+
+setInterval(() => {
+  const now = Date.now()
+  for (const [token, entry] of validTokens) {
+    if (now - entry.issuedAt > 24 * 60 * 60 * 1000) {
+      validTokens.delete(token)
+    }
+  }
+}, 60 * 60 * 1000)
+
 const router = Router()
 
 router.post('/', async (req: Request, res: Response): Promise<void> => {
@@ -55,17 +71,19 @@ router.post('/:roomId/verify', async (req: Request, res: Response): Promise<void
   const { password } = req.body
 
   const db = getDB()
-  const result = db.exec('SELECT password_hash FROM rooms WHERE id = ?', [roomId])
+  const result = db.exec('SELECT id, name, password_hash FROM rooms WHERE id = ?', [roomId])
 
   if (!result[0]?.values.length) {
     res.status(404).json({ success: false, error: 'Room not found' })
     return
   }
 
-  const passwordHash = result[0].values[0][0] as string | null
+  const roomName = result[0].values[0][1] as string
+  const passwordHash = result[0].values[0][2] as string | null
 
   if (!passwordHash) {
-    res.json({ success: true, data: { valid: true, token: generateToken(roomId) } })
+    const token = generateToken(roomId)
+    res.json({ success: true, data: { valid: true, token, roomName } })
     return
   }
 
@@ -80,14 +98,37 @@ router.post('/:roomId/verify', async (req: Request, res: Response): Promise<void
     return
   }
 
-  res.json({ success: true, data: { valid: true, token: generateToken(roomId) } })
+  const token = generateToken(roomId)
+  res.json({ success: true, data: { valid: true, token, roomName } })
 })
 
 function generateToken(roomId: string): string {
-  const timestamp = Date.now()
-  const raw = `${roomId}:${timestamp}`
-  const hash = bcrypt.hashSync(raw, 8)
-  return Buffer.from(`${raw}:${hash}`).toString('base64')
+  const raw = `${roomId}:${Date.now()}:${Math.random().toString(36).slice(2)}`
+  validTokens.set(raw, { roomId, issuedAt: Date.now() })
+  return Buffer.from(raw).toString('base64')
+}
+
+export function verifyToken(token: string, roomId: string): boolean {
+  try {
+    const raw = Buffer.from(token, 'base64').toString()
+    const entry = validTokens.get(raw)
+    if (!entry) return false
+    if (entry.roomId !== roomId) return false
+    if (Date.now() - entry.issuedAt > 24 * 60 * 60 * 1000) {
+      validTokens.delete(raw)
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function getRoomPasswordHash(roomId: string): string | null {
+  const db = getDB()
+  const result = db.exec('SELECT password_hash FROM rooms WHERE id = ?', [roomId])
+  if (!result[0]?.values.length) return undefined as unknown as null
+  return result[0].values[0][0] as string | null
 }
 
 export default router

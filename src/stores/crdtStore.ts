@@ -6,6 +6,8 @@ import type { DrawingElement, OnlineUser } from '../../shared/types'
 import { useCursorStore } from './cursor-store'
 import { useRoomStore } from './roomStore'
 
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+
 interface CrdtState {
   ydoc: Y.Doc | null
   yelements: Y.Array<Y.Map<unknown>> | null
@@ -13,7 +15,7 @@ interface CrdtState {
   clientId: string
   undoManager: Y.UndoManager | null
   elements: DrawingElement[]
-  connected: boolean
+  connectionState: ConnectionState
   canUndo: boolean
   canRedo: boolean
   connect: (roomId: string, token: string, userName: string) => void
@@ -25,6 +27,17 @@ interface CrdtState {
   redo: () => void
   sendCursor: (x: number, y: number) => void
 }
+
+interface ConnectParams {
+  roomId: string
+  token: string
+  userName: string
+}
+
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectAttempts = 0
+let connectParams: ConnectParams | null = null
+let intentionalDisconnect = false
 
 function ymapToElement(ymap: Y.Map<unknown>): DrawingElement {
   const obj: Record<string, unknown> = {}
@@ -91,6 +104,17 @@ function buildWsUrl(): string {
   return `${protocol}//${window.location.host}/ws`
 }
 
+function scheduleReconnect(connectFn: (roomId: string, token: string, userName: string) => void) {
+  if (intentionalDisconnect || !connectParams) return
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
+  reconnectAttempts++
+  reconnectTimer = setTimeout(() => {
+    if (!intentionalDisconnect && connectParams) {
+      connectFn(connectParams.roomId, connectParams.token, connectParams.userName)
+    }
+  }, delay)
+}
+
 export const useCrdtStore = create<CrdtState>((set, get) => ({
   ydoc: null,
   yelements: null,
@@ -98,40 +122,48 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
   clientId: `client-${Math.random().toString(36).slice(2, 10)}`,
   undoManager: null,
   elements: [],
-  connected: false,
+  connectionState: 'disconnected',
   canUndo: false,
   canRedo: false,
 
   connect: (roomId, token, userName) => {
-    const { clientId } = get()
-    const ydoc = new Y.Doc()
-    const yelements = ydoc.getArray<Y.Map<unknown>>('elements')
+    const { clientId, ydoc: existingDoc, yelements: existingElements } = get()
 
-    const undoManager = new Y.UndoManager(yelements, {
-      captureTransaction: (tr) => tr.origin === clientId,
-    })
+    connectParams = { roomId, token, userName }
+    intentionalDisconnect = false
 
-    const updateUndoState = () => {
+    const ydoc = existingDoc ?? new Y.Doc()
+    const yelements = existingElements ?? ydoc.getArray<Y.Map<unknown>>('elements')
+
+    if (!existingDoc) {
+      const undoManager = new Y.UndoManager(yelements, {
+        captureTransaction: (tr) => tr.origin === clientId,
+      })
+
+      const updateUndoState = () => {
+        set({
+          canUndo: undoManager.undoStack.length > 0,
+          canRedo: undoManager.redoStack.length > 0,
+        })
+      }
+      undoManager.on('stack-item-added', updateUndoState)
+      undoManager.on('stack-item-popped', updateUndoState)
+      undoManager.on('stack-cleared', updateUndoState)
+
+      const observer = () => {
+        set({ elements: syncLocalElements(yelements) })
+      }
+      yelements.observeDeep(observer)
+
       set({
-        canUndo: undoManager.undoStack.length > 0,
-        canRedo: undoManager.redoStack.length > 0,
+        ydoc,
+        yelements,
+        undoManager,
+        elements: syncLocalElements(yelements),
       })
     }
-    undoManager.on('stack-item-added', updateUndoState)
-    undoManager.on('stack-item-popped', updateUndoState)
-    undoManager.on('stack-cleared', updateUndoState)
 
-    const observer = () => {
-      set({ elements: syncLocalElements(yelements) })
-    }
-    yelements.observeDeep(observer)
-
-    set({
-      ydoc,
-      yelements,
-      undoManager,
-      elements: syncLocalElements(yelements),
-    })
+    set({ connectionState: 'connecting' })
 
     const wsUrl = buildWsUrl()
     const ws = new WebSocket(wsUrl)
@@ -149,7 +181,8 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
       encoding.writeVarUint8Array(encoder, stateVector)
       ws.send(encoding.toUint8Array(encoder))
 
-      set({ ws, connected: true })
+      reconnectAttempts = 0
+      set({ ws, connectionState: 'connected' })
     })
 
     ws.addEventListener('message', (event) => {
@@ -231,21 +264,44 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
       }
     })
 
-    ws.addEventListener('close', () => {
-      set({ connected: false })
+    ws.addEventListener('close', (event) => {
+      const currentWs = get().ws
+      if (currentWs === ws) {
+        set({ ws: null, connectionState: 'disconnected' })
+      }
+      if (!intentionalDisconnect) {
+        set({ connectionState: 'reconnecting' })
+        scheduleReconnect(get().connect)
+      }
+    })
+
+    ws.addEventListener('error', () => {
+      const currentWs = get().ws
+      if (currentWs === ws) {
+        set({ ws: null, connectionState: 'reconnecting' })
+      }
     })
 
     ydoc.on('update', (update: Uint8Array, origin: unknown) => {
-      if (origin === clientId && ws.readyState === WebSocket.OPEN) {
+      const currentWs = get().ws
+      if (origin === clientId && currentWs && currentWs.readyState === WebSocket.OPEN) {
         const encoder = encoding.createEncoder()
         encoding.writeVarUint(encoder, 2)
         encoding.writeVarUint8Array(encoder, update)
-        ws.send(encoding.toUint8Array(encoder))
+        currentWs.send(encoding.toUint8Array(encoder))
       }
     })
   },
 
   disconnect: () => {
+    intentionalDisconnect = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    reconnectAttempts = 0
+    connectParams = null
+
     const { ws, ydoc } = get()
     if (ws) {
       ws.close()
@@ -260,7 +316,7 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
       ws: null,
       undoManager: null,
       elements: [],
-      connected: false,
+      connectionState: 'disconnected',
       canUndo: false,
       canRedo: false,
     })

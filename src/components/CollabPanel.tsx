@@ -24,9 +24,18 @@ export default function CollabPanel() {
   const handleExportPNG = () => {
     const canvas = document.querySelector('canvas')
     if (!canvas) return
+    const exportCanvas = document.createElement('canvas')
+    exportCanvas.width = canvas.width
+    exportCanvas.height = canvas.height
+    const ctx = exportCanvas.getContext('2d')
+    if (!ctx) return
+    ctx.fillStyle = '#1a1b2e'
+    ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height)
+    ctx.drawImage(canvas, 0, 0)
     const link = document.createElement('a')
-    link.download = `syncboard-${roomName || 'export'}.png`
-    link.href = canvas.toDataURL('image/png')
+    const safeName = (roomName || 'export').replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, '_')
+    link.download = `syncboard-${safeName}.png`
+    link.href = exportCanvas.toDataURL('image/png')
     link.click()
   }
 

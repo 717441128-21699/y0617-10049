@@ -7,7 +7,7 @@ import PasswordModal from '@/components/PasswordModal'
 
 export default function Lobby() {
   const navigate = useNavigate()
-  const { userName, setUserName, setRoom } = useRoomStore()
+  const { userName, setUserName, setRoom, createRoom, verifyRoom } = useRoomStore()
 
   const [localName, setLocalName] = useState(userName)
   const [roomName, setRoomName] = useState('')
@@ -53,17 +53,13 @@ export default function Lobby() {
     }
     setCreating(true)
     try {
-      const res = await fetch('/api/rooms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: roomName.trim(),
-          password: roomPassword.trim() || undefined,
-        }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        await handleVerify(data.data.roomId)
+      const result = await createRoom(roomName.trim(), roomPassword.trim() || undefined)
+      if (result) {
+        const verifyResult = await verifyRoom(result.roomId, roomPassword.trim())
+        if (verifyResult.valid && verifyResult.token) {
+          setRoom(result.roomId, verifyResult.roomName || result.name, verifyResult.token)
+          navigate(`/room/${result.roomId}`)
+        }
       }
     } catch {
       // error
@@ -85,21 +81,15 @@ export default function Lobby() {
     setVerifying(true)
     setPasswordError(null)
     try {
-      const res = await fetch(`/api/rooms/${roomId}/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: password || '' }),
-      })
-      const data = await res.json()
-      if (data.success && data.data.valid) {
-        const room = rooms.find((r) => r.roomId === roomId)
-        setRoom(roomId, room?.name || '', data.data.token)
+      const result = await verifyRoom(roomId, password || '')
+      if (result.valid && result.token) {
+        setRoom(roomId, result.roomName || rooms.find((r) => r.roomId === roomId)?.name || '', result.token)
         setPasswordModal({ open: false, room: null })
         navigate(`/room/${roomId}`)
-      } else if (data.success && !data.data.valid) {
+      } else if (result.valid === false) {
         setPasswordError('密码错误，请重试')
       } else {
-        setPasswordError(data.error || '验证失败')
+        setPasswordError('验证失败')
       }
     } catch {
       setPasswordError('网络错误，请重试')
