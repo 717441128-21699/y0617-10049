@@ -90,13 +90,19 @@ export function setupWebSocket(wss: WebSocketServer): void {
           encoding.writeVarUint8Array(joinEncoder, joinBroadcastPayload)
           broadcastToRoom(roomId, encoding.toUint8Array(joinEncoder), ws)
 
-          const remaining = decoding.readVarUint8Array(decoder)
-          if (remaining.length > 0) {
-            const diff = Y.encodeStateAsUpdate(room.ydoc, remaining)
-            const syncEncoder = encoding.createEncoder()
-            encoding.writeVarUint(syncEncoder, 1)
-            encoding.writeVarUint8Array(syncEncoder, diff)
-            ws.send(encoding.toUint8Array(syncEncoder))
+          const clientStateVector = decoding.readVarUint8Array(decoder)
+          if (clientStateVector.length > 0) {
+            const serverDiffForClient = Y.encodeStateAsUpdate(room.ydoc, clientStateVector)
+            const syncEncoder1 = encoding.createEncoder()
+            encoding.writeVarUint(syncEncoder1, 1)
+            encoding.writeVarUint8Array(syncEncoder1, serverDiffForClient)
+            ws.send(encoding.toUint8Array(syncEncoder1))
+
+            const serverStateVector = Y.encodeStateVector(room.ydoc)
+            const syncEncoder2 = encoding.createEncoder()
+            encoding.writeVarUint(syncEncoder2, 0)
+            encoding.writeVarUint8Array(syncEncoder2, serverStateVector)
+            ws.send(encoding.toUint8Array(syncEncoder2))
           }
 
           joined = true

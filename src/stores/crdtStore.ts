@@ -6,7 +6,7 @@ import type { DrawingElement, OnlineUser } from '../../shared/types'
 import { useCursorStore } from './cursor-store'
 import { useRoomStore } from './roomStore'
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'auth-failed'
 
 interface CrdtState {
   ydoc: Y.Doc | null
@@ -18,6 +18,7 @@ interface CrdtState {
   connectionState: ConnectionState
   canUndo: boolean
   canRedo: boolean
+  authFailureReason: string | null
   connect: (roomId: string, token: string, userName: string) => void
   disconnect: () => void
   addElement: (element: DrawingElement) => void
@@ -26,6 +27,7 @@ interface CrdtState {
   undo: () => void
   redo: () => void
   sendCursor: (x: number, y: number) => void
+  clearAuthFailure: () => void
 }
 
 interface ConnectParams {
@@ -125,6 +127,7 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
   connectionState: 'disconnected',
   canUndo: false,
   canRedo: false,
+  authFailureReason: null,
 
   connect: (roomId, token, userName) => {
     const { clientId, ydoc: existingDoc, yelements: existingElements } = get()
@@ -163,7 +166,7 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
       })
     }
 
-    set({ connectionState: 'connecting' })
+    set({ connectionState: 'connecting', authFailureReason: null })
 
     const wsUrl = buildWsUrl()
     const ws = new WebSocket(wsUrl)
@@ -195,9 +198,11 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
         case 0: {
           const diff = Y.encodeStateAsUpdate(ydoc, payload)
           const respEncoder = encoding.createEncoder()
-          encoding.writeVarUint(respEncoder, 1)
+          encoding.writeVarUint(respEncoder, 2)
           encoding.writeVarUint8Array(respEncoder, diff)
-          ws.send(encoding.toUint8Array(respEncoder))
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(encoding.toUint8Array(respEncoder))
+          }
           break
         }
         case 1: {
@@ -269,6 +274,22 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
       if (currentWs === ws) {
         set({ ws: null, connectionState: 'disconnected' })
       }
+
+      const isAuthError = event.code >= 4001 && event.code <= 4003
+      if (isAuthError) {
+        intentionalDisconnect = true
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
+        let reason = '凭证已过期'
+        if (event.code === 4001) reason = '房间信息无效'
+        if (event.code === 4002) reason = '请求格式错误'
+        if (event.code === 4003) reason = '访问凭证无效或已过期'
+        set({ connectionState: 'auth-failed', authFailureReason: reason })
+        return
+      }
+
       if (!intentionalDisconnect) {
         set({ connectionState: 'reconnecting' })
         scheduleReconnect(get().connect)
@@ -319,6 +340,7 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
       connectionState: 'disconnected',
       canUndo: false,
       canRedo: false,
+      authFailureReason: null,
     })
   },
 
@@ -383,5 +405,9 @@ export const useCrdtStore = create<CrdtState>((set, get) => ({
     encoding.writeVarUint(encoder, 3)
     encoding.writeVarUint8Array(encoder, cursorPayload)
     ws.send(encoding.toUint8Array(encoder))
+  },
+
+  clearAuthFailure: () => {
+    set({ authFailureReason: null, connectionState: 'disconnected' })
   },
 }))
