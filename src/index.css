@@ -1,0 +1,114 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=DM+Sans:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-navy: #1a1b2e;
+    --color-navy-light: #2d2f45;
+    --color-accent: #00e5a0;
+    --color-accent-dark: #00b880;
+    --color-text-primary: #f0f0f5;
+    --color-text-secondary: #8b8da3;
+  }
+
+  body {
+    @apply bg-navy text-textPrimary font-dmSans;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-outfit;
+  }
+
+  * {
+    @apply border-navyLight;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-navyLight/60 backdrop-blur-xl border border-white/10;
+  }
+
+  .glass-strong {
+    @apply bg-navyLight/80 backdrop-blur-2xl border border-white/15;
+  }
+}
+
+@layer utilities {
+  .glow-accent {
+    box-shadow: 0 0 12px rgba(0, 229, 160, 0.4), 0 0 4px rgba(0, 229, 160, 0.2);
+  }
+
+  .glow-accent-strong {
+    box-shadow: 0 0 20px rgba(0, 229, 160, 0.5), 0 0 8px rgba(0, 229, 160, 0.3);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-navy);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-navy-light);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3d3f5e;
+}
+
+.canvas-crosshair {
+  cursor: crosshair;
+}
+
+.canvas-move {
+  cursor: grab;
+}
+
+.canvas-move:active {
+  cursor: grabbing;
+}
+
+.canvas-text {
+  cursor: text;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes glow-pulse-key {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(0, 229, 160, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 229, 160, 0.6);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.animate-glow-pulse-key {
+  animation: glow-pulse-key 2s ease-in-out infinite;
+}
